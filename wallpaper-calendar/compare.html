@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Wallpaper preview</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#111;color:#eee;font-family:"Helvetica Neue",sans-serif;padding:1.5rem 2rem 3rem}
+  .controls{display:flex;gap:1.5rem;align-items:center;margin-bottom:1.2rem;flex-wrap:wrap}
+  .controls span{font-size:.8rem;color:#888}
+  button{background:none;border:1px solid #444;color:#bbb;font:inherit;font-size:.8rem;
+    padding:.3rem .7rem;cursor:pointer}
+  button.on{border-color:#eee;color:#fff}
+  input{background:none;border:1px solid #444;color:#eee;font:inherit;font-size:.8rem;
+    padding:.3rem .5rem;width:3.2rem}
+  iframe{width:100%;aspect-ratio:16/9;border:0;display:block}
+</style>
+</head>
+<body>
+<div class="controls">
+  <span>Month</span><div id="months"></div>
+  <span>Day</span><input id="day" type="number" min="1" max="31">
+  <span>Style</span>
+  <button data-style="gradient" class="on">gradient</button>
+  <button data-style="solid">solid</button>
+</div>
+<iframe></iframe>
+
+<script>
+const now = new Date();
+let month = now.getMonth()+1, day = now.getDate(), style = "gradient";
+const mbox = document.getElementById("months");
+for(let m=1;m<=12;m++){
+  const b=document.createElement("button");
+  b.textContent=m; b.dataset.month=m;
+  mbox.appendChild(b);
+}
+const dayInput = document.getElementById("day");
+dayInput.value = day;
+function refresh(){
+  document.querySelector("iframe").src =
+    `wallpaper.html?year=2026&month=${month}&day=${day}&style=${style}`;
+  document.querySelectorAll("[data-month]").forEach(b=>b.classList.toggle("on",+b.dataset.month===month));
+  document.querySelectorAll("[data-style]").forEach(b=>b.classList.toggle("on",b.dataset.style===style));
+}
+document.addEventListener("click",e=>{
+  if(e.target.dataset.month){ month=+e.target.dataset.month; refresh(); }
+  if(e.target.dataset.style){ style=e.target.dataset.style; refresh(); }
+});
+dayInput.addEventListener("change",()=>{ day=Math.max(1,Math.min(31,+dayInput.value||1)); refresh(); });
+refresh();
+</script>
+</body>
+</html>

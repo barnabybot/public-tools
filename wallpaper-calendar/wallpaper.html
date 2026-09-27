@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Calendar Wallpaper</title>
+<style>
+  :root{
+    --ink: rgba(12,12,14,.92);
+    --ink-soft: rgba(12,12,14,.8);
+    --ink-quiet: rgba(12,12,14,.58);
+    --rule: rgba(0,0,0,.18);
+    --font-display: "Helvetica Neue",Inter,-apple-system,sans-serif;
+    --font-text: "Helvetica Neue",Inter,-apple-system,sans-serif;
+    --num-weight: 300;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;overflow:hidden}
+  body{
+    font-family:var(--font-text);
+    color:var(--ink);
+    -webkit-font-smoothing:antialiased;
+  }
+  .wp{position:fixed;inset:0}
+  .field{position:absolute;inset:0}
+  .streak{position:absolute;inset:-15%;pointer-events:none}
+  .grain{
+    position:absolute;inset:0;opacity:.03;pointer-events:none;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='512' height='512'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='512' height='512' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size:512px 512px;
+  }
+  /* Layer 2 — seven hairline rules forming a closed fence of six cells,
+     each cell exactly two grid columns. Every rule sits half a gutter from
+     the content beside it: the interior five centred in real gutters, the
+     outer pair in an imaginary gutter just outside the margins. Vertical
+     extent from the reference: 8.9% top, 8.5% bottom. */
+  .rules{position:absolute;top:8.9%;bottom:8.5%;left:0;right:0;pointer-events:none}
+  .rules i{position:absolute;top:0;bottom:0;width:1px;background:var(--rule)}
+
+  /* Grid overlay — the 12 columns themselves, same grammar as the site's
+     Grid: On/Off bands: solid ink at low opacity, over everything.
+     Shown with ?grid=1 or the G key; clean by default. */
+  .grid12{
+    position:absolute;top:0;bottom:0;
+    left:5.8%;width:88.4%;
+    display:grid;grid-template-columns:repeat(12,1fr);
+    column-gap:1.1784%;              /* 20px at 1920, resolved inside this container */
+    pointer-events:none;visibility:hidden;z-index:5;
+  }
+  .grid12 i{background:var(--ink);opacity:.08}
+  body.grid .grid12{visibility:visible}
+
+  .year{
+    position:absolute;top:9.3%;   /* same top band as weekday, month and credit */
+    font-size:1vh;font-weight:400;letter-spacing:.05em;
+    color:var(--ink-quiet);
+  }
+  /* Layer 3 — the numeral: today's date. Each digit is anchored to its own
+     cell so a double digit reads | 1 | 2 | inside the fence. */
+  .num{position:absolute;inset:0;z-index:2;pointer-events:none}
+  .num span{
+    position:absolute;
+    font-family:var(--font-display);
+    font-size:40vh;font-weight:var(--num-weight);line-height:.92;
+    font-variant-numeric:lining-nums;
+    color:var(--ink);
+  }
+  .month{
+    position:absolute;z-index:2;
+    font-size:2.7vh;font-weight:400;letter-spacing:.01em;
+    color:var(--ink);
+  }
+  .weekday{
+    position:absolute;z-index:2;
+    font-size:1.7vh;font-weight:400;letter-spacing:.03em;
+    color:var(--ink-soft);
+  }
+  /* Layer 4 — mini calendar. Type at 1vh, matching the credit and year, which
+     sizes the seven columns to reach roughly half of the cell's second grid
+     column — one type size across all small text. */
+  .cal{
+    position:absolute;border-collapse:collapse;
+    font-size:1vh;font-weight:400;color:var(--ink-quiet);
+  }
+  .cal th{
+    font-weight:400;color:var(--ink-quiet);
+    padding:0 0 1.2vh 0;text-align:center;
+  }
+  .cal td{
+    text-align:center;padding:.6vh 0;
+    min-width:2.7vh;font-variant-numeric:tabular-nums;
+    position:relative;z-index:0;
+  }
+  .cal td.today{color:var(--knockout)}
+  .cal td.today::before{
+    content:"";position:absolute;left:50%;top:50%;
+    width:2.2vh;height:2.2vh;transform:translate(-50%,-50%);
+    background:var(--ink);border-radius:.3vh;z-index:-1;
+  }
+  .cal .wk{color:var(--ink-quiet);opacity:.7}
+  /* Layer 5 — colour credit block */
+  .credit{
+    position:absolute;z-index:2;
+    font-size:1vh;font-weight:400;line-height:2;
+    letter-spacing:.01em;
+    color:var(--ink-quiet);
+  }
+</style>
+</head>
+<body>
+<div class="wp">
+  <div class="field"></div>
+  <div class="streak"></div>
+  <div class="rules"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  <div class="grid12"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  <div class="year"></div>
+  <div class="num"></div>
+  <div class="weekday"></div>
+  <div class="month"></div>
+  <table class="cal"></table>
+  <div class="credit"></div>
+  <div class="grain"></div>
+</div>
+
+<script>
+/* ============================================================
+   CONFIG — everything you would ever want to change is here.
+   ============================================================ */
+const CONFIG = {
+  weekNumbers: false,        // week-number column in the mini calendar
+  mondayFirst: true,
+  defaultStyle: "gradient",  // "gradient" | "solid"
+  appearance: "auto",        // "light" | "dark" | "auto" (auto follows macOS in live mode)
+  font: "helvetica",         // key into FONTS below; ?font= overrides per render
+
+  // One entry per month. hex drives both the fill and the credit block,
+  // and is converted to OKLCH at runtime to derive the gradient stops.
+  // ink: "auto" flips to light ink on dark fields; force "dark"/"light" to override.
+  // Palette mapped seasonally (northern hemisphere). Alternates:
+  // #04433C deep teal, #E1D4C1 parchment, #7E6D47 olive, #966B3E caramel,
+  // #1C6EA4 deep cool blue, #0A2723 bottle green.
+  palette: [
+    { name:"Harbour Navy",     hex:"#1B2F57", moods:"Stillness, resolve, depth" },
+    { name:"Midnight Indigo",  hex:"#202068", moods:"Rest, patience, thaw" },
+    { name:"Bone White",       hex:"#E9E8DB", moods:"Thaw, clarity, beginning" },
+    { name:"Rainwashed Sky",   hex:"#80C7E3", moods:"Cleansing, optimism, movement" },
+    { name:"Warm Sand",        hex:"#E3CBA6", moods:"Bloom, warmth, ease" },
+    { name:"Sunwarmed Brass",  hex:"#C79F4F", moods:"Light, abundance, transition" },
+    { name:"Sunlit Coral",     hex:"#EB483F", moods:"Energy, celebration, heat" },
+    { name:"Baked Terracotta", hex:"#A0523C", moods:"Maturity, warmth, richness" },
+    { name:"Botanical Green",  hex:"#4A6B4F", moods:"Steadiness, gathering, turn" },
+    { name:"Burnt Orange",     hex:"#B5612A", moods:"Harvest, glow, dusk" },
+    { name:"November Steel",   hex:"#7194BD", moods:"Quiet, clarity, frost" },
+    { name:"Deep Forest",      hex:"#094034", moods:"Rest, evergreen, return" },
+  ],
+
+  // Layout is dealt daily: a PRNG seeded by the date shuffles which cells
+  // and vertical bands the digits, weekday, month, credit and year land in.
+  // Same date, same deal — re-renders and exports are stable; midnight deals
+  // a new composition. The calendar always anchors cell 0.
+};
+
+/* ============================================================
+   Colour math — sRGB hex → OKLCH, so gradients derive from the
+   same value the credit block prints.
+   ============================================================ */
+function hexToOklch(hex){
+  const n = parseInt(hex.slice(1),16);
+  const lin = c => { c/=255; return c<=0.04045 ? c/12.92 : Math.pow((c+0.055)/1.055,2.4); };
+  const r=lin(n>>16&255), g=lin(n>>8&255), b=lin(n&255);
+  const l_=Math.cbrt(0.4122214708*r+0.5363325363*g+0.0514459929*b);
+  const m_=Math.cbrt(0.2119034982*r+0.6806995451*g+0.1073969566*b);
+  const s_=Math.cbrt(0.0883024619*r+0.2817188376*g+0.6299787005*b);
+  const L=0.2104542553*l_+0.7936177850*m_-0.0040720468*s_;
+  const a=1.9779984951*l_-2.4285922050*m_+0.4505937099*s_;
+  const bb=0.0259040371*l_+0.7827717662*m_-0.8086757660*s_;
+  return { L, C:Math.hypot(a,bb), H:(Math.atan2(bb,a)*180/Math.PI+360)%360 };
+}
+function relLuminance(hex){
+  const n = parseInt(hex.slice(1),16);
+  const lin = c => { c/=255; return c<=0.04045 ? c/12.92 : Math.pow((c+0.055)/1.055,2.4); };
+  return 0.2126*lin(n>>16&255)+0.7152*lin(n>>8&255)+0.0722*lin(n&255);
+}
+const ok = (L,C,H,a=1) => `oklch(${(L*100).toFixed(1)}% ${C.toFixed(4)} ${H.toFixed(1)} / ${a})`;
+
+/* ============================================================
+   Layout geometry — 12-column grid at the reference's 5.8%
+   side margins with 20px gutters (20px at a 1920 basis). Six
+   cells of exactly two columns each; the weekday earns its
+   own cell, separate from the date numerals. Content aligns
+   to column edges; rules live on the margin lines and gutter
+   centres. Vertical bands hang off the fence: 8.9% / 8.5%.
+   ============================================================ */
+const MARGIN = 5.8;
+const GUTTER = 100*20/1920;                  // 1.0417%
+const COLW   = (100 - 2*MARGIN - 11*GUTTER)/12;   // 6.4118%
+const colX   = i => MARGIN + i*(COLW+GUTTER);     // left edge of column i
+const SPANS  = [2,2,2,2,2,2];                // cal · five dealt cells
+const CELL_START = [0,2,4,6,8,10];
+const cellX  = k => colX(CELL_START[k]);
+const cellW  = k => SPANS[k]*COLW + (SPANS[k]-1)*GUTTER;
+/* the outer pair sit half a gutter outside the content edges — an imaginary
+   gutter — so the first and last columns get the same air as the interior */
+const RULE_X = [MARGIN - GUTTER/2,
+                ...CELL_START.slice(1).map(i => colX(i) - GUTTER/2),
+                100 - MARGIN + GUTTER/2];
+const BANDS = { top:{top:"7.1%"}, mid:{top:"24.9%"}, low:{top:"59.5%"} };
+const WORD_BANDS = { top:{top:"9.3%"}, mid:{top:"40.2%"}, low:{top:"64.8%"} };
+const CREDIT_BANDS = { top:{top:"9.3%"}, low:{bottom:"10.5%"} };
+
+const MONTHS = ["January","February","March","April","May","June",
+                "July","August","September","October","November","December"];
+
+/* Font combinations: display face carries the hero numeral, text face carries
+   everything small. All are system faces; nothing is bundled. */
+const FONTS = {
+  helvetica: { display:'"Helvetica Neue",sans-serif',  weight:300, text:'"Helvetica Neue",sans-serif' },
+  mono:      { display:'Menlo,monospace',              weight:400, text:'Menlo,monospace' },
+};
+
+/* The digits size themselves to the grid: after the face loads they measure
+   their widest advance and scale so it spans the cell exactly, column edge
+   to the next gutter — the same start point and fill the small text obeys.
+   Faces with uneven digit widths (Kobe) still self-clamp by the same rule. */
+const fitDigits = () => {
+  const spans = [...document.querySelectorAll(".num span")];
+  if(!spans.length) return;
+  const allowed = innerWidth * cellW(1)/100;
+  spans.forEach(s=>s.style.fontSize="");
+  const widest = Math.max(...spans.map(s=>s.getBoundingClientRect().width));
+  if(widest > 0) spans.forEach(s=>s.style.fontSize=(40*allowed/widest).toFixed(2)+"vh");
+};
+
+/* Monday-first grid; returns rows of {d, iso} cells (null = blank) */
+function monthGrid(y,m){
+  const first = (new Date(y,m,1).getDay()+6)%7;       // 0 = Monday
+  const days  = new Date(y,m+1,0).getDate();
+  const cells = Array(first).fill(null)
+    .concat(Array.from({length:days},(_,i)=>i+1));
+  while(cells.length%7) cells.push(null);
+  const rows=[]; for(let i=0;i<cells.length;i+=7) rows.push(cells.slice(i,i+7));
+  return rows;
+}
+/* ISO 8601 week number */
+function isoWeek(y,m,d){
+  const t = new Date(Date.UTC(y,m,d));
+  t.setUTCDate(t.getUTCDate()+4-(t.getUTCDay()||7));
+  const y0 = new Date(Date.UTC(t.getUTCFullYear(),0,1));
+  return Math.ceil(((t-y0)/864e5+1)/7);
+}
+
+/* ============================================================
+   Render
+   ============================================================ */
+const q = new URLSearchParams(location.search);
+const LIVE = !q.has("month");
+
+/* the six fence rules sit at fixed grid positions */
+document.querySelectorAll(".rules i").forEach((el,i)=>{ el.style.left = RULE_X[i]+"%"; });
+
+function resolveAppearance(){
+  const a = q.get("appearance") || CONFIG.appearance;
+  if(a!=="auto") return a;
+  return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function render(){
+  const now = new Date();
+  const year  = parseInt(q.get("year"))  || now.getFullYear();
+  const month = (parseInt(q.get("month")) || now.getMonth()+1) - 1;  // 0-based
+  const daysInMonth = new Date(year,month+1,0).getDate();
+  const day = Math.min(parseInt(q.get("day")) || now.getDate(), daysInMonth);
+  const style = q.get("style") || CONFIG.defaultStyle;
+  const dark  = resolveAppearance()==="dark";
+  const font  = FONTS[q.get("font")] || FONTS[CONFIG.font] || FONTS.helvetica;
+
+  const pal  = CONFIG.palette[month];
+  const prev = CONFIG.palette[(month+11)%12];
+  const c    = hexToOklch(pal.hex);
+  const cp   = hexToOklch(prev.hex);
+
+  /* ink: auto-flip on dark fields (config override wins) */
+  let darkField = dark || (pal.ink ? pal.ink==="light" : relLuminance(pal.hex) < 0.13);
+  if(pal.ink==="dark") darkField = false;
+  const rs = document.documentElement.style;
+  rs.setProperty("--font-display", font.display);
+  rs.setProperty("--font-text", font.text);
+  rs.setProperty("--num-weight", font.weight);
+  if(darkField){
+    rs.setProperty("--ink","rgba(250,247,240,.92)");
+    rs.setProperty("--ink-soft","rgba(250,247,240,.8)");
+    rs.setProperty("--ink-quiet","rgba(250,247,240,.6)");
+    rs.setProperty("--rule","rgba(255,255,255,.22)");
+    rs.setProperty("--knockout","rgba(12,12,14,.9)");
+  } else {
+    rs.setProperty("--ink","rgba(12,12,14,.92)");
+    rs.setProperty("--ink-soft","rgba(12,12,14,.8)");
+    rs.setProperty("--ink-quiet","rgba(12,12,14,.58)");
+    rs.setProperty("--rule","rgba(0,0,0,.18)");
+    rs.setProperty("--knockout","rgba(255,255,255,.95)");
+  }
+
+  /* Layer 1 — the field */
+  const field = document.querySelector(".field");
+  const streak = document.querySelector(".streak");
+  const Lb = dark ? Math.max(.22, c.L*.5) : c.L;       // dark appearance sinks the field
+  const Cb = dark ? c.C*.8 : c.C;
+  if(style==="solid"){
+    field.style.background =
+      `linear-gradient(180deg, ${ok(Lb-.03,Cb,c.H)} 0%, ${ok(Lb,Cb,c.H)} 40%, ${ok(Math.min(.98,Lb+.03),Cb*.94,c.H)} 100%)`;
+    streak.style.background = "none";
+  } else {
+    /* Sampled from the reference: a near-uniform colour object, the previous
+       month's hue washing the top-left, the deepest hue bottom-right, and a
+       pale in-hue radial bloom at bottom-left. Never white — the bloom caps
+       at L 84.5% and keeps ~40% of the base chroma. */
+    const dH = ((cp.H - c.H + 540) % 360) - 180;   // shortest hue distance
+    const Htl = c.H + Math.max(-60, Math.min(60, dH))*0.45;  // distant neighbours stay kin
+    /* the wash blends chroma as well as hue, so a pale neighbour softens the
+       corner rather than lending its hue at full saturation */
+    const Ctl = Cb*.6 + Math.min(cp.C, Cb)*.48;
+    /* pale bases can't take a +20L bloom (it would clip to white), so they
+       get a whisper of light and a deeper corner does the work instead */
+    const paleBase = Lb > .8;
+    const Lpale = paleBase ? Math.min(.96, Lb+.03) : Math.min(.845, Lb+.20);
+    const Ldeep = paleBase ? Lb-.08 : Math.max(.18, Lb-.04);
+    field.style.background =
+      `radial-gradient(90% 85% at 14% 86% in oklab,
+        ${ok(Lpale, Cb*.4, c.H+5)} 0%,
+        ${ok(Lpale, Cb*.4, c.H+5, 0)} 68%),
+       linear-gradient(118deg in oklab,
+        ${ok(Math.min(.9,Lb+.03), Ctl, Htl)} 0%,
+        ${ok(Lb, Cb, c.H)} 52%,
+        ${ok(Ldeep, Cb*.92, c.H+8)} 100%)`;
+    streak.style.background =
+      `linear-gradient(118deg, transparent 36%, rgba(255,255,255,${dark?.03:.05}) 48%, transparent 62%)`;
+  }
+
+  /* Layers 3–5 — the date deals the layout. Seeded PRNG: same date, same
+     deal, so re-renders and both displays agree; midnight re-deals. */
+  let seed = year*10000 + (month+1)*100 + day;
+  const rand = () => {
+    seed|=0; seed = seed+0x6D2B79F5|0;
+    let t = Math.imul(seed^seed>>>15, 1|seed);
+    t = t+Math.imul(t^t>>>7, 61|t)^t;
+    return ((t^t>>>14)>>>0)/4294967296;
+  };
+  const pick = a => a[Math.floor(rand()*a.length)];
+  const place = (el, col, bandTable, band) => {
+    el.style.left = cellX(col)+"%";
+    el.style.top = ""; el.style.bottom = "";
+    Object.assign(el.style, bandTable[band]);
+  };
+
+  /* the hero numeral is the day of the month, one digit per cell; a double
+     digit takes an adjacent pair from cells 1–5, dealt daily */
+  const numEl = document.querySelector(".num");
+  numEl.innerHTML = "";
+  const digits = String(day).split("");
+  const numBand = pick(["top","mid","low"]);
+  const startCol = 1 + Math.floor(rand()*(6-digits.length));   // never cell 0
+  digits.forEach((d,i)=>{
+    const s = document.createElement("span");
+    s.textContent = d;
+    s.style.left = cellX(startCol+i)+"%";
+    if(numBand==="low"){ s.style.bottom="10.5%"; }
+    else Object.assign(s.style, BANDS[numBand]);
+    numEl.appendChild(s);
+  });
+  fitDigits();
+
+  /* One field per column. The calendar owns cell 0, the digits their cells,
+     and the weekday, month word, credit and year deal into the remaining
+     columns so none sits empty. The weekday keeps its own cell — never
+     shared with the numerals or the month — banded opposite the numeral. */
+  const digitCells = new Set(digits.map((_,i)=>startCol+i));
+  const free = [1,2,3,4,5].filter(k=>!digitCells.has(k));
+  for(let i=free.length-1;i>0;i--){                            // seeded shuffle
+    const j = Math.floor(rand()*(i+1)); [free[i],free[j]]=[free[j],free[i]];
+  }
+
+  const wdEl = document.querySelector(".weekday");
+  wdEl.textContent = new Date(year,month,day).toLocaleDateString("en-GB",{weekday:"long"});
+  wdEl.style.left = cellX(free[0])+"%";
+  wdEl.style.top=""; wdEl.style.bottom="";
+  Object.assign(wdEl.style, WORD_BANDS[numBand==="top" ? "low" : "top"]);
+
+  const wordEl = document.querySelector(".month");
+  wordEl.textContent = MONTHS[month];
+  place(wordEl, free[1], WORD_BANDS, pick(["top","mid","low"]));
+
+  const creditEl = document.querySelector(".credit");
+  creditEl.innerHTML = `${pal.name}<br>${pal.hex.toUpperCase()}<br>${pal.moods}`;
+  place(creditEl, free[2], CREDIT_BANDS, pick(["top","low"]));
+
+  const yearEl = document.querySelector(".year");
+  yearEl.textContent = year;
+  yearEl.style.left = cellX(free[3] ?? 0)+"%";
+
+  /* Layer 4 — mini calendar; the shown day is always highlighted */
+  const cal = document.querySelector(".cal");
+  const today = day;
+  const heads = CONFIG.mondayFirst ? ["M","T","W","T","F","S","S"] : ["S","M","T","W","T","F","S"];
+  let html = "<tr>" + (CONFIG.weekNumbers?"<th class='wk'>W</th>":"") +
+             heads.map(h=>`<th>${h}</th>`).join("") + "</tr>";
+  for(const row of monthGrid(year,month)){
+    const firstDay = row.find(d=>d!==null);
+    html += "<tr>" +
+      (CONFIG.weekNumbers?`<td class='wk'>${firstDay?isoWeek(year,month,firstDay):""}</td>`:"") +
+      row.map(d=>`<td${d!==null&&d===today?" class='today'":""}>${d??""}</td>`).join("") + "</tr>";
+  }
+  /* always bottom-left: the last week row sits just above the fence end */
+  cal.innerHTML = html;
+  cal.style.left = cellX(0)+"%";
+  cal.style.bottom = "11%";
+}
+
+render();
+document.fonts.ready.then(fitDigits);   // re-fit once web fonts land
+
+/* Grid overlay: ?grid=1 for exports, G key while viewing in a browser. */
+if(q.get("grid")==="1") document.body.classList.add("grid");
+addEventListener("keydown", e=>{
+  if(e.key==="g" || e.key==="G") document.body.classList.toggle("grid");
+});
+
+/* Live mode (Plash): roll over at midnight, follow appearance changes.
+   The interval check is the belt to the midnight timer's braces — a sleep/wake
+   cycle can strand a suspended setTimeout, but the date comparison can't miss. */
+if(LIVE){
+  const untilMidnight = () => {
+    const n=new Date(), m=new Date(n.getFullYear(),n.getMonth(),n.getDate()+1);
+    return m-n+1000;
+  };
+  const tick = () => { render(); setTimeout(tick, untilMidnight()); };
+  setTimeout(tick, untilMidnight());
+  /* Sleep strands timers, so every cheap wake signal re-checks the date:
+     a 60s interval plus focus/visibility/pageshow, which fire when the page
+     resumes after wake. Renders only when the date actually changed. */
+  let shown = new Date().getDate();
+  const check = () => { const d=new Date().getDate(); if(d!==shown){ shown=d; render(); } };
+  setInterval(check, 60*1000);
+  addEventListener("focus", check);
+  addEventListener("pageshow", check);
+  document.addEventListener("visibilitychange", check);
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
+}
+</script>
+</body>
+</html>
