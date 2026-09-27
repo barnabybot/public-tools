@@ -1,5 +1,7 @@
 # Calendar wallpaper
 
+![Calendar wallpaper for 27 September 2026, gradient style](docs/preview.png)
+
 A macOS desktop wallpaper that shows today's date, a mini calendar for the
 month and one colour per month. The layout is dealt again each day from a
 date-seeded shuffle. The same date always gives the same layout.
