@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# One wallpaper.html CDP/Chrome screenshot (not the full 48-image generate.sh).
+set -euo pipefail
+HERE=$(cd "$(dirname "$0")" && pwd)
+ROOT=$(cd "$HERE/../../../.." && pwd)
+YEAR=${1:-2026}
+MONTH=${2:-1}
+STYLE=${3:-gradient}
+W=${4:-1280}
+H=${5:-720}
+RUN_ID=${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}
+OUT=${SHOT_OUT:-$ROOT/scratchpad/verify-public-tools/$RUN_ID}
+mkdir -p "$OUT"
+CHROME="${CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
+HTML="$ROOT/wallpaper-calendar/wallpaper.html"
+FILE="$OUT/wallpaper-${YEAR}-$(printf '%02d' "$MONTH")-${STYLE}-${W}x${H}.png"
+PROFILE=$(mktemp -d)
+trap 'rm -rf "$PROFILE"' EXIT
+URL="file://${HTML}?year=${YEAR}&month=${MONTH}&style=${STYLE}"
+echo "OUT=$OUT"
+echo "FILE=$FILE"
+perl -e 'alarm shift; exec @ARGV' 25 \
+  "$CHROME" --headless --disable-gpu --hide-scrollbars \
+  --no-first-run --disable-component-update --disable-background-networking \
+  --user-data-dir="$PROFILE" \
+  --force-device-scale-factor=1 --window-size="$W,$H" \
+  --virtual-time-budget=1500 \
+  --screenshot="$FILE" "$URL" >/dev/null 2>&1 || true
+[[ -s "$FILE" ]] || { echo "FAILED: empty screenshot" >&2; exit 1; }
+ls -la "$FILE"
