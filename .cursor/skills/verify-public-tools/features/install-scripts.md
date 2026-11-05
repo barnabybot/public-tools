@@ -6,7 +6,7 @@
 
 ## How to get to it (user POV)
 
-- Run install.sh from README.
+- From `wallpaper-calendar/`, run `./install.sh` (`wallpaper-calendar/README.md`, Set up step 3). The repo root README only links to that directory.
 
 ## Driving it with preview-shots
 
