@@ -15,7 +15,47 @@ CHROME="${CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
 HTML="$ROOT/wallpaper-calendar/wallpaper.html"
 FILE="$OUT/wallpaper-${YEAR}-$(printf '%02d' "$MONTH")-${STYLE}-${W}x${H}.png"
 PROFILE=$(mktemp -d)
-trap 'rm -rf "$PROFILE"' EXIT
+
+# The 25s alarm kills Chrome after the PNG is written. Children can recreate
+# profile files during rm, so cleanup retries and must not change the shot's exit status.
+stop_profile_chrome() {
+  local pid args
+  [[ -n "${PROFILE:-}" ]] || return 0
+  if [[ -d /proc ]]; then
+    for pid in /proc/[0-9]*; do
+      pid="${pid#/proc/}"
+      [[ "$pid" == "$$" ]] && continue
+      # cat, not a shell redirect: the pid can vanish between glob and read.
+      args=$(cat "/proc/$pid/cmdline" 2>/dev/null | tr '\0' ' ' || true)
+      if [[ "$args" == *"--user-data-dir=${PROFILE}"* ]]; then
+        kill "$pid" 2>/dev/null || true
+      fi
+    done
+  elif command -v pgrep >/dev/null 2>&1; then
+    local pids
+    pids=$(pgrep -f -- "--user-data-dir=${PROFILE}" || true)
+    for pid in $pids; do
+      [[ "$pid" == "$$" ]] && continue
+      kill "$pid" 2>/dev/null || true
+    done
+  fi
+}
+
+cleanup() {
+  local status=$?
+  local _
+  if [[ -n "${PROFILE:-}" && -d "$PROFILE" ]]; then
+    for _ in 1 2 3 4 5; do
+      stop_profile_chrome
+      rm -rf "$PROFILE" 2>/dev/null && break
+      sleep 0.3
+    done
+    rm -rf "$PROFILE" 2>/dev/null || true
+  fi
+  exit "$status"
+}
+trap cleanup EXIT
+
 URL="file://${HTML}?year=${YEAR}&month=${MONTH}&style=${STYLE}"
 echo "OUT=$OUT"
 echo "FILE=$FILE"
