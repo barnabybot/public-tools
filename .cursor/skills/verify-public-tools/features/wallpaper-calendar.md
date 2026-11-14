@@ -7,7 +7,9 @@
 
 ## How to get to it (user POV)
 
-- Follow README install / generate instructions.
+- Live desktop: in Plash, Add Website with the `file://` URL of `wallpaper-calendar/wallpaper.html` and no query string (`wallpaper-calendar/README.md` Set up). No `month` param means live mode.
+- Static PNGs: `cd wallpaper-calendar && ./generate.sh [year]` (README "Static PNGs"). Optional for verification.
+- System-wallpaper install is a different feature. Do not run `install.sh` to reach this page.
 
 ## Driving it with preview-shots
 
@@ -17,3 +19,5 @@
 ## Gotchas
 
 - Same Chrome timeout behaviour as private tools repo copy.
+- The one-shot URL sets `year`, `month`, and `style` only. With `month` set and `day` omitted, `wallpaper.html` uses today's day-of-month, clamped to that month — not day 1. On the 5th, `wallpaper-shot 2026 1 gradient` is 5 January.
+- `generate.sh` always calls `/Applications/Google Chrome.app/...` and does not read `CHROME`. The one-shot helper does.
