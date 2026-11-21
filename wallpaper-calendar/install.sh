@@ -1,6 +1,4 @@
 #!/bin/bash
-# Installs the two LaunchAgents that keep the system wallpaper in step with
-# the live Plash page. Safe to rerun.
 set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"

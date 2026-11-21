@@ -1,6 +1,4 @@
 #!/bin/bash
-# Export the full wallpaper set via headless Chrome.
-# Usage: ./generate.sh [year]        (defaults to the current year)
 set -euo pipefail
 
 YEAR="${1:-$(date +%Y)}"
@@ -11,14 +9,11 @@ CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 PROFILE="$(mktemp -d)"
 trap 'rm -rf "$PROFILE"' EXIT
 
-# Detected displays on this machine; add rows as "WxH".
 RESOLUTIONS=("5120x2880" "4480x2520")
 STYLES=("gradient" "solid")
 MONTHS=(january february march april may june july august september october november december)
 
-# Chrome's updater keeps the headless process alive after the shot is written,
-# so run each export under a hard timeout and verify the file instead.
-shot() { # w h url out
+shot() {
   perl -e 'alarm shift; exec @ARGV' 25 \
     "$CHROME" --headless --disable-gpu --hide-scrollbars \
     --no-first-run --disable-component-update --disable-background-networking \
