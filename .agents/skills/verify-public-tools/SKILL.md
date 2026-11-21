@@ -29,7 +29,7 @@ echo 'ok: ready'
 
 ```bash
 RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)
-.cursor/skills/verify-public-tools/scripts/wallpaper-shot 2026 1 gradient 1280 720
+.agents/skills/verify-public-tools/scripts/wallpaper-shot 2026 1 gradient 1280 720
 ```
 
 Optional full export: `(cd wallpaper-calendar && ./generate.sh 2026)`.
@@ -40,4 +40,4 @@ PNGs under `scratchpad/verify-public-tools/<RUN_ID>/`. Leave them after Chrome t
 
 ## Helpers
 
-`.cursor/skills/verify-public-tools/scripts/wallpaper-shot [year] [month] [style] [w] [h]`
+`.agents/skills/verify-public-tools/scripts/wallpaper-shot [year] [month] [style] [w] [h]`
