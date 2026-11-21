@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/check_binary_ratchet.py
+      - run: python3 scripts/check_code_comments.py --ratchet
+      - name: Shell syntax checks
+        run: |
+          for f in wallpaper-calendar/*.sh; do
+            bash -n "$f"
+          done
