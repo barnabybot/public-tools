@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+python3 "$ROOT/scripts/check_binary_ratchet.py" --repo "$ROOT"
+python3 "$ROOT/scripts/check_code_comments.py" --root "$ROOT" --ratchet
+python3 -m py_compile "$ROOT"/scripts/*.py
+for f in "$ROOT"/wallpaper-calendar/*.sh "$ROOT/.agents/skills/verify-public-tools/scripts/wallpaper-shot"; do
+  bash -n "$f"
+done

@@ -13,7 +13,7 @@
 
 ## Driving it with preview-shots
 
-- `.cursor/skills/verify-public-tools/scripts/wallpaper-shot 2026 1 gradient`
+- `.agents/skills/verify-public-tools/scripts/wallpaper-shot 2026 1 gradient`
 - **Proof.** Non-empty PNG in evidence dir.
 
 ## Gotchas
