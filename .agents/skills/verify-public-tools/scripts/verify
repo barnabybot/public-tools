@@ -1,0 +1,277 @@
+#!/usr/bin/env python3
+import argparse
+import calendar
+import datetime
+import hashlib
+import importlib.util
+import json
+import os
+from pathlib import Path
+import plistlib
+import shlex
+import shutil
+import signal
+import struct
+import subprocess
+import sys
+import tempfile
+
+
+ROOT = Path(__file__).resolve().parents[4]
+DEFAULT_CHROME = Path('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')
+CHROME = Path(os.environ.get('CHROME', str(DEFAULT_CHROME)))
+FEATURES = ('wallpaper-calendar', 'install-scripts', 'wallpaper-previews', 'repo-hygiene')
+SANDBOX = '''(version 1)
+(allow default)
+(deny file-write*)
+(deny process-exec (literal "/bin/launchctl") (literal "/usr/bin/osascript")
+                  (literal "/usr/bin/xcrun") (literal "/usr/bin/killall"))'''
+
+
+def require(condition, message):
+    if not condition:
+        raise RuntimeError(message)
+
+
+def terminate_group(pid):
+    try:
+        os.killpg(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        os.killpg(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
+def run(command, timeout=25, env=None):
+    with subprocess.Popen(command, cwd=ROOT, env=env, stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT, text=True, start_new_session=True) as process:
+        timed_out = False
+        try:
+            output, _ = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            terminate_group(process.pid)
+            output, _ = process.communicate(timeout=3)
+        finally:
+            terminate_group(process.pid)
+        return {'command': shlex.join([str(x) for x in command]),
+                'exit_code': process.returncode, 'timed_out': timed_out, 'output': output}
+
+
+def checked(command, env=None):
+    result = run(command, env=env)
+    require(result['exit_code'] == 0 and not result['timed_out'], json.dumps(result))
+    return result
+
+
+def doctor(feature=None):
+    require(sys.version_info >= (3, 9), 'Python 3.9 or later is required')
+    require(CHROME.is_file() and os.access(CHROME, os.X_OK), 'CHROME must name an executable')
+    require(shutil.which('bash') is not None, 'bash is required')
+    if feature in (None, 'install-scripts'):
+        require(Path('/usr/bin/sandbox-exec').is_file(), 'macOS sandbox-exec is required')
+    if feature in (None, 'wallpaper-previews'):
+        require(importlib.util.find_spec('playwright') is not None,
+                'Python Playwright is required for the preview controls recipe')
+    files = ('wallpaper.html', 'compare.html', 'year.html', 'watch-display-changes.swift',
+             'wallpaper-calendar.plist', 'wallpaper-calendar-display-watch.plist')
+    for name in files:
+        require((ROOT / 'wallpaper-calendar' / name).is_file(), 'missing source: ' + name)
+    for name in ('generate.sh', 'install.sh', 'refresh-system-wallpaper.sh'):
+        require(os.access(ROOT / 'wallpaper-calendar' / name, os.X_OK), 'not executable: ' + name)
+    for name in ('scripts/check_code_comments.py', 'scripts/check_binary_ratchet.py',
+                 '.agents/skills/delete-comment/SKILL.md', '.githooks/pre-commit', '.githooks/pre-push'):
+        require((ROOT / name).is_file(), 'missing source: ' + name)
+    print('doctor: ok (' + (feature or 'all features') + ')', flush=True)
+
+
+def wallpaper(out, parameters):
+    defaults = ('2026', '1', 'gradient', '1280', '720')
+    require(len(parameters) <= 5, 'wallpaper-shot [year] [month] [style] [width] [height]')
+    year, month, style, width, height = list(parameters) + list(defaults[len(parameters):])
+    year, month, width, height = map(int, (year, month, width, height))
+    require(1 <= year <= 9999 and 1 <= month <= 12, 'invalid year or month')
+    require(style in ('gradient', 'solid') and width > 0 and height > 0, 'invalid style or size')
+    filename = 'wallpaper-{}-{:02d}-{}-{}x{}.png'.format(year, month, style, width, height)
+    url = (ROOT / 'wallpaper-calendar/wallpaper.html').as_uri()
+    url += '?year={}&month={}&style={}'.format(year, month, style)
+    with tempfile.TemporaryDirectory(prefix='chrome-shot-', dir=out) as temporary:
+        work = Path(temporary)
+        image = work / 'fresh.png'
+        result = run([str(CHROME), '--headless', '--disable-gpu', '--hide-scrollbars',
+                      '--no-first-run', '--disable-component-update', '--disable-background-networking',
+                      '--disable-crashpad-for-testing', '--user-data-dir=' + str(work / 'profile'),
+                      '--force-device-scale-factor=1', '--window-size={},{}'.format(width, height),
+                      '--virtual-time-budget=1500', '--screenshot=' + str(image), url])
+        stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
+        (out / ('chrome-' + stamp + '.json')).write_text(json.dumps(result, indent=2) + '\n')
+        require(image.is_file(), 'Chrome produced no fresh screenshot')
+        require(result['exit_code'] == 0 or result['timed_out'], 'Chrome failed: ' + json.dumps(result))
+        with image.open('rb') as stream:
+            header = stream.read(24)
+        require(header[:8] == b'\x89PNG\r\n\x1a\n' and header[12:16] == b'IHDR', 'invalid PNG')
+        require(struct.unpack('>II', header[16:24]) == (width, height), 'wrong screenshot dimensions')
+        image.replace(out / filename)
+    data = (out / filename).read_bytes()
+    return {'file': str(out / filename), 'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest(),
+            'dimensions': [width, height], 'url': url, 'chrome_exit': result['exit_code'],
+            'chrome_timed_out': result['timed_out'], 'profile_removed': not work.exists()}
+
+
+def installation(out):
+    directory = ROOT / 'wallpaper-calendar'
+    env = dict(os.environ, PATH='/usr/bin:/bin:/usr/sbin:/sbin')
+    require(DEFAULT_CHROME.is_file() and os.access(DEFAULT_CHROME, os.X_OK),
+            'install.sh requires Chrome at its fixed /Applications path')
+    commands = [checked(['bash', '-n', str(directory / name)])
+                for name in ('install.sh', 'refresh-system-wallpaper.sh', 'generate.sh')]
+    templates = []
+    for path in sorted(directory.glob('*.plist')):
+        data = plistlib.loads(path.read_text().replace('__DIR__', str(directory)).encode())
+        require(data.get('Label') and data.get('ProgramArguments'), 'invalid LaunchAgent template')
+        for argument in data['ProgramArguments']:
+            if argument.startswith(str(directory) + '/'):
+                require(Path(argument).is_file(), 'missing agent target: ' + argument)
+        require(Path(data['ProgramArguments'][0]).is_file(), 'missing agent interpreter')
+        templates.append({'source': str(path.relative_to(ROOT)), 'expanded': data})
+    require(len(templates) == 2, 'expected the refresh and display watcher templates')
+    with tempfile.TemporaryDirectory(prefix='sandbox-probe-', dir=out) as temporary:
+        probe = Path(temporary) / 'denied'
+        result = run(['/usr/bin/sandbox-exec', '-p', SANDBOX, '/bin/bash', '-c',
+                      ': > "$1"', 'probe', str(probe)], env=env)
+        require(result['exit_code'] != 0 and not probe.exists()
+                and 'Operation not permitted' in result['output'], 'read-only sandbox failed its write probe')
+        commands.append(result)
+    result = run(['/usr/bin/sandbox-exec', '-p', SANDBOX, '/bin/bash', str(directory / 'install.sh')], env=env)
+    require(result['exit_code'] != 0 and not result['timed_out']
+            and 'Operation not permitted' in result['output'] and 'Loaded ' not in result['output'],
+            'installer did not stop at a sandbox denial: ' + json.dumps(result))
+    commands.append(result)
+    return {'shell_syntax': 'passed', 'templates': templates, 'commands': commands,
+            'activation': 'verified-unreachable: requires authorised LaunchAgent writes and launchctl; '
+                          'the real installer was attempted under a read-only sandbox',
+            'wallpaper_application': 'unverified: requires native desktop changes'}
+
+
+def hygiene(out):
+    aliases = []
+    target = ROOT / '.agents/skills/delete-comment'
+    for surface in ('.cursor', '.claude'):
+        path = ROOT / surface / 'skills/delete-comment'
+        require(path.is_symlink() and path.resolve() == target, 'broken delete-comment alias: ' + surface)
+        aliases.append(str(path.relative_to(ROOT)))
+    commands = []
+    for tool in ('check_code_comments.py', 'check_binary_ratchet.py'):
+        commands.append(checked([sys.executable, 'scripts/' + tool, '--help']))
+    for flags in (('--audit',), ('--ratchet',)):
+        commands.append(checked([sys.executable, 'scripts/check_code_comments.py', '--root', '.', *flags]))
+    commands.append(checked([sys.executable, 'scripts/check_binary_ratchet.py', '--repo', '.']))
+    with tempfile.TemporaryDirectory(prefix='hook-cache-', dir=out) as temporary:
+        env = dict(os.environ, PYTHONPYCACHEPREFIX=temporary)
+        for hook in ('.githooks/pre-commit', '.githooks/pre-push'):
+            commands.append(checked(['bash', hook], env=env))
+    require((ROOT / 'docs/adr/README.md').is_file(), 'missing ADR index')
+    return {'aliases': aliases, 'commands': commands, 'hook_cache_removed': not Path(temporary).exists(),
+            'delete_comment': 'discovery and read-only audit passed; '
+                              'deletion, ADR writes, issue creation and baseline writes were not invoked'}
+
+
+def previews(out):
+    from playwright.sync_api import sync_playwright
+    errors = []
+    snapshots = []
+    with tempfile.TemporaryDirectory(prefix='chrome-previews-', dir=out) as temporary:
+        with sync_playwright() as playwright:
+            context = playwright.chromium.launch_persistent_context(
+                temporary, executable_path=str(CHROME), headless=True, timeout=15000,
+                viewport={'width': 1280, 'height': 900},
+                args=['--disable-background-networking', '--disable-component-update',
+                      '--disable-crashpad-for-testing'])
+            try:
+                page = context.pages[0]
+                page.set_default_timeout(8000)
+                page.on('pageerror', lambda error: errors.append(str(error)))
+                page.goto((ROOT / 'wallpaper-calendar/compare.html').as_uri(), wait_until='load')
+                page.locator('[data-month="2"]').click()
+                page.locator('#day').fill('31')
+                page.locator('#day').dispatch_event('change')
+                page.locator('[data-style="solid"]').click()
+                frame = page.frame_locator('iframe')
+                frame.locator('.cal td.today').wait_for()
+                frame.locator('.streak[style*="none"]').wait_for(state='attached')
+                require(frame.locator('.month').inner_text() == 'February', 'compare month did not change')
+                rendered_year = int(frame.locator('.year').inner_text())
+                require(frame.locator('.cal td.today').inner_text() == str(calendar.monthrange(rendered_year, 2)[1]),
+                        'compare day did not clamp')
+                require(page.locator('[data-style="solid"]').get_attribute('class') == 'on',
+                        'compare style control did not change')
+                snapshots.append({'page': 'compare.html', 'iframe': page.locator('iframe').get_attribute('src'),
+                                  'month': frame.locator('.month').inner_text(),
+                                  'day': frame.locator('.cal td.today').inner_text(),
+                                  'year': frame.locator('.year').inner_text(),
+                                  'solid_streak': frame.locator('.streak').evaluate('(e) => e.style.background')})
+                require(snapshots[-1]['solid_streak'] == 'none', 'compare solid style did not reach the frame')
+                (out / 'compare-dom.html').write_text(page.content())
+                page.goto((ROOT / 'wallpaper-calendar/year.html').as_uri(), wait_until='load')
+                page.locator('#day').fill('31')
+                page.locator('#day').dispatch_event('change')
+                page.locator('[data-style="solid"]').click()
+                require(page.locator('iframe').count() == 12, 'year overview is missing month frames')
+                for month in range(1, 13):
+                    selector = 'iframe[data-month="{}"]'.format(month)
+                    frame = page.frame_locator(selector)
+                    frame.locator('.cal td.today').wait_for()
+                    frame.locator('.streak[style*="none"]').wait_for(state='attached')
+                    snapshot = {'page': 'year.html', 'month': month,
+                                'label': frame.locator('.month').inner_text(),
+                                'day': frame.locator('.cal td.today').inner_text(),
+                                'year': frame.locator('.year').inner_text(),
+                                'solid_streak': frame.locator('.streak').evaluate('(e) => e.style.background')}
+                    require(snapshot['label'] == calendar.month_name[month], 'wrong year overview month')
+                    require(snapshot['day'] == str(calendar.monthrange(int(snapshot['year']), month)[1]),
+                            'wrong clamped day')
+                    require(snapshot['solid_streak'] == 'none', 'year style did not reach a frame')
+                    snapshots.append(snapshot)
+                (out / 'year-dom.html').write_text(page.content())
+            finally:
+                context.close()
+    require(not errors, 'browser page errors: ' + json.dumps(errors))
+    return {'snapshots': snapshots, 'page_errors': errors, 'profile_removed': not Path(temporary).exists(),
+            'observed_years': sorted({snapshot['year'] for snapshot in snapshots})}
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('feature', choices=('doctor',) + FEATURES)
+    parser.add_argument('parameters', nargs='*')
+    args = parser.parse_args()
+    doctor(None if args.feature == 'doctor' else args.feature)
+    if args.feature == 'doctor':
+        return
+    require(args.feature == 'wallpaper-calendar' or not args.parameters, 'unexpected feature parameters')
+    run_id = os.environ.get('RUN_ID', datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ'))
+    out = Path(os.environ.get('SHOT_OUT', str(ROOT / 'scratchpad/verify-public-tools' / run_id))).resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    try:
+        if args.feature == 'wallpaper-calendar':
+            result = wallpaper(out, args.parameters)
+        else:
+            result = {'install-scripts': installation, 'repo-hygiene': hygiene,
+                      'wallpaper-previews': previews}[args.feature](out)
+    except Exception as error:
+        (out / (args.feature + '.json')).write_text(json.dumps(
+            {'feature': args.feature, 'outcome': 'failed', 'error': str(error)}, indent=2) + '\n')
+        raise
+    result.update(feature=args.feature, outcome='passed')
+    (out / (args.feature + '.json')).write_text(json.dumps(result, indent=2) + '\n')
+    print(json.dumps(result, indent=2))
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except Exception as error:
+        print('FAILED: ' + str(error), file=sys.stderr)
+        sys.exit(1)
